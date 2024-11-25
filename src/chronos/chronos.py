@@ -169,7 +169,8 @@ class MeanScaleUniformBins(ChronosTokenizer):
     def _input_transform(
         self, context: torch.Tensor, scale: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        context = context.to(dtype=torch.float32)
+        self.boundaries = self.boundaries.to(context.device)
+        context = context.to(dtype=torch.float32).to(self.boundaries.device)
         attention_mask = ~torch.isnan(context)
 
         if scale is None:
@@ -199,10 +200,10 @@ class MeanScaleUniformBins(ChronosTokenizer):
     def _append_eos_token(
         self, token_ids: torch.Tensor, attention_mask: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        batch_size = token_ids.shape[0]
-        eos_tokens = torch.full((batch_size, 1), fill_value=self.config.eos_token_id)
+        device = token_ids.device
+        eos_tokens = torch.full((token_ids.size(0), 1), fill_value=self.config.eos_token_id, dtype=token_ids.dtype).to(device)
         token_ids = torch.concat((token_ids, eos_tokens), dim=1)
-        eos_mask = torch.full((batch_size, 1), fill_value=True)
+        eos_mask = torch.full((token_ids.size(0), 1), fill_value=True, dtype=attention_mask.dtype).to(device)
         attention_mask = torch.concat((attention_mask, eos_mask), dim=1)
 
         return token_ids, attention_mask
@@ -242,12 +243,16 @@ class MeanScaleUniformBins(ChronosTokenizer):
     def output_transform(
         self, samples: torch.Tensor, scale: torch.Tensor
     ) -> torch.Tensor:
-        scale_unsqueezed = scale.unsqueeze(-1).unsqueeze(-1)
+        device = samples.device
+        scale = scale.to(device)
+        scale_unsqueezed = scale.unsqueeze(-1).unsqueeze(-1).to(device)
+        self.centers = self.centers.to(device)
         indices = torch.clamp(
             samples - self.config.n_special_tokens - 1,
             min=0,
             max=len(self.centers) - 1,
-        )
+        ).long()
+        indices = indices.to(device)
         return self.centers[indices] * scale_unsqueezed
 
 
